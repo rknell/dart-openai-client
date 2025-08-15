@@ -1,7 +1,7 @@
 name: dart_openai_client
 description: A clean, modular Dart client for OpenAI-compatible APIs with full support for function calling (tool calling) capabilities
 version: 0.1.0
-homepage: https://github.com/yourusername/dart-openai-client
+homepage: https://github.com/rknell/dart-openai-client
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
