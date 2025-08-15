@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:test/test.dart';
 import 'package:dart_openai_client/dart_openai_client.dart';
 
@@ -6,284 +7,226 @@ import 'package:dart_openai_client/dart_openai_client.dart';
 /// Tests conversation management, tool execution, and message handling
 /// to ensure the Agent class works correctly in all scenarios.
 void main() {
-  group('Agent Tests', () {
-    late MockApiClient mockApiClient;
+  group('Agent Tool Filtering Tests', () {
+    late ApiClient mockApiClient;
     late ToolExecutorRegistry toolRegistry;
-    late WeatherToolExecutor weatherExecutor;
-    late Agent agent;
+    late WeatherToolExecutor weatherTool;
+    late MockToolExecutor mockTool;
 
     setUp(() {
-      mockApiClient = MockApiClient();
-      toolRegistry = ToolExecutorRegistry();
-      weatherExecutor = WeatherToolExecutor();
-      toolRegistry.registerExecutor(weatherExecutor);
-
-      agent = Agent(
-        apiClient: mockApiClient,
-        toolRegistry: toolRegistry,
-        messages: [],
-        systemPrompt: 'You are a helpful weather assistant.',
+      // Create mock API client
+      mockApiClient = ApiClient(
+        baseUrl: 'https://api.deepseek.com',
+        apiKey: 'test-key',
       );
+
+      // Create tool registry
+      toolRegistry =
+          McpToolExecutorRegistry(mcpConfig: File("config/mcp_servers.json"));
+
+      // Create weather tool
+      weatherTool = WeatherToolExecutor();
+      toolRegistry.registerExecutor(weatherTool);
+
+      // Create mock tool
+      mockTool = MockToolExecutor('mock_tool', 'Mock tool for testing');
+      toolRegistry.registerExecutor(mockTool);
     });
 
-    group('🛠️ Constructor and Properties', () {
-      test('✅ Creates agent with correct initial state', () {
-        expect(agent.apiClient, equals(mockApiClient));
-        expect(agent.toolRegistry, equals(toolRegistry));
-        expect(
-            agent.systemPrompt, equals('You are a helpful weather assistant.'));
-        expect(agent.messages, isEmpty);
-        expect(agent.messageCount, equals(0));
-        expect(agent.conversationHistory, isEmpty);
-      });
-
-      test('✅ Creates agent with existing messages', () {
-        final existingMessages = [
-          Message.user(content: 'Hello'),
-          Message.assistant(content: 'Hi there!'),
-        ];
-
-        final agentWithMessages = Agent(
+    group('🛡️ REGRESSION: Agent tool filtering respects allowedToolNames', () {
+      test('Agent with no restrictions can access all tools', () {
+        final agent = Agent(
           apiClient: mockApiClient,
           toolRegistry: toolRegistry,
-          messages: existingMessages,
-          systemPrompt: 'Test prompt',
+          systemPrompt: 'Test agent',
         );
 
-        expect(agentWithMessages.messages, equals(existingMessages));
-        expect(agentWithMessages.messageCount, equals(2));
-      });
-    });
-
-    group('📚 Conversation Management', () {
-      test('✅ System prompt is automatically managed', () async {
-        // Mock API response
-        mockApiClient.setMockResponse(Message.assistant(
-            content: 'Hello! How can I help you with weather?'));
-
-        await agent.sendMessage('What\'s the weather like?');
-
-        // Check that system message is first
-        expect(agent.messages.first.role, equals('system'));
-        expect(agent.messages.first.content,
-            equals('You are a helpful weather assistant.'));
-
-        // Check that user message was added
-        expect(agent.messages[1].role, equals('user'));
-        expect(agent.messages[1].content, equals('What\'s the weather like?'));
-
-        // Check that assistant response was added
-        expect(agent.messages[2].role, equals('assistant'));
-        expect(agent.messages[2].content,
-            equals('Hello! How can I help you with weather?'));
+        final filteredTools = agent.getFilteredTools();
+        expect(filteredTools.length, equals(2));
+        expect(filteredTools.map((t) => t.function.name).toSet(),
+            containsAll(['get_weather', 'mock_tool']));
       });
 
-      test('✅ Only one system message is maintained', () async {
-        mockApiClient
-            .setMockResponse(Message.assistant(content: 'First response'));
-
-        await agent.sendMessage('First message');
-
-        // Send second message
-        mockApiClient
-            .setMockResponse(Message.assistant(content: 'Second response'));
-        await agent.sendMessage('Second message');
-
-        // Should only have one system message
-        final systemMessages =
-            agent.messages.where((msg) => msg.role == 'system').toList();
-        expect(systemMessages.length, equals(1));
-        expect(systemMessages.first.content,
-            equals('You are a helpful weather assistant.'));
-      });
-
-      test('✅ Message count increases correctly', () async {
-        expect(agent.messageCount, equals(0));
-
-        mockApiClient.setMockResponse(Message.assistant(content: 'Response'));
-        await agent.sendMessage('Test message');
-
-        // System + User + Assistant = 3 messages
-        expect(agent.messageCount, equals(3));
-      });
-
-      test('✅ Conversation history is accessible', () async {
-        mockApiClient.setMockResponse(Message.assistant(content: 'Response'));
-        await agent.sendMessage('Test message');
-
-        final history = agent.conversationHistory;
-        expect(history.length, equals(3));
-        expect(history.first.role, equals('system'));
-        expect(history[1].role, equals('user'));
-        expect(history[2].role, equals('assistant'));
-      });
-
-      test('✅ Last message getter works correctly', () async {
-        expect(agent.lastMessage, equals(''));
-
-        mockApiClient.setMockResponse(
-            Message.assistant(content: 'Last message content'));
-        await agent.sendMessage('Test message');
-
-        expect(agent.lastMessage, equals('Last message content'));
-      });
-    });
-
-    group('🧹 Conversation Clearing', () {
-      test('✅ Clear conversation removes non-system messages', () async {
-        mockApiClient.setMockResponse(Message.assistant(content: 'Response'));
-        await agent.sendMessage('Test message');
-
-        expect(agent.messageCount, equals(3)); // System + User + Assistant
-
-        agent.clearConversation();
-
-        expect(agent.messageCount, equals(1)); // Only system message remains
-        expect(agent.messages.first.role, equals('system'));
-        expect(agent.messages.first.content,
-            equals('You are a helpful weather assistant.'));
-      });
-    });
-
-    group('🛠️ Tool Execution', () {
-      test('✅ Tool calls are executed automatically', () async {
-        // Mock API response with tool call
-        final toolCall = ToolCall(
-          id: 'call_123',
-          type: 'function',
-          function: ToolCallFunction(
-            name: 'get_weather',
-            arguments: '{"location": "Hangzhou"}',
-          ),
+      test(
+          'Agent with specific tool restrictions can only access allowed tools',
+          () {
+        final agent = Agent(
+          apiClient: mockApiClient,
+          toolRegistry: toolRegistry,
+          systemPrompt: 'Test agent',
+          allowedToolNames: {'get_weather'},
         );
 
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'I will check the weather',
-          toolCalls: [toolCall],
-        ));
-
-        // Mock final response after tool execution
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'The weather in Hangzhou is 24°C, Partly Cloudy',
-        ));
-
-        final response =
-            await agent.sendMessage('What\'s the weather in Hangzhou?');
-
-        expect(response.content,
-            equals('The weather in Hangzhou is 24°C, Partly Cloudy'));
-
-        // Check that tool result was added to conversation
-        final toolResult =
-            agent.messages.where((msg) => msg.role == 'tool').toList();
-        expect(toolResult.length, equals(1));
-        expect(toolResult.first.toolCallId, equals('call_123'));
-        expect(toolResult.first.content, equals('24°C, Partly Cloudy'));
+        final filteredTools = agent.getFilteredTools();
+        expect(filteredTools.length, equals(1));
+        expect(filteredTools.first.function.name, equals('get_weather'));
       });
 
-      test('✅ Multiple tool calls are executed', () async {
-        final toolCall1 = ToolCall(
+      test('Agent with empty allowed tools gets no tools', () {
+        final agent = Agent(
+          apiClient: mockApiClient,
+          toolRegistry: toolRegistry,
+          systemPrompt: 'Test agent',
+          allowedToolNames: <String>{},
+        );
+
+        final filteredTools = agent.getFilteredTools();
+        expect(filteredTools, isEmpty);
+      });
+    });
+
+    group('🔍 VALIDATION: Agent constructor validates tool names', () {
+      test('Agent with invalid tool names throws ArgumentError', () {
+        expect(() {
+          Agent(
+            apiClient: mockApiClient,
+            toolRegistry: toolRegistry,
+            systemPrompt: 'Test agent',
+            allowedToolNames: {'nonexistent_tool'},
+          );
+        }, throwsA(isA<ArgumentError>()));
+      });
+
+      test('Agent with valid tool names creates successfully', () {
+        expect(() {
+          Agent(
+            apiClient: mockApiClient,
+            toolRegistry: toolRegistry,
+            systemPrompt: 'Test agent',
+            allowedToolNames: {'get_weather', 'mock_tool'},
+          );
+        }, returnsNormally);
+      });
+
+      test('Agent with null allowedToolNames creates successfully', () {
+        expect(() {
+          Agent(
+            apiClient: mockApiClient,
+            toolRegistry: toolRegistry,
+            systemPrompt: 'Test agent',
+            allowedToolNames: null,
+          );
+        }, returnsNormally);
+      });
+    });
+
+    group('🛠️ VALIDATION: Tool access validation works correctly', () {
+      late Agent restrictedAgent;
+
+      setUp(() {
+        restrictedAgent = Agent(
+          apiClient: mockApiClient,
+          toolRegistry: toolRegistry,
+          systemPrompt: 'Test agent',
+          allowedToolNames: {'get_weather'},
+        );
+      });
+
+      test('validateToolAccess allows authorized tools', () {
+        final authorizedToolCall = ToolCall(
           id: 'call_1',
           type: 'function',
           function: ToolCallFunction(
             name: 'get_weather',
-            arguments: '{"location": "Tokyo"}',
+            arguments: '{"location": "San Francisco"}',
           ),
         );
 
-        final toolCall2 = ToolCall(
+        expect(() {
+          restrictedAgent.validateToolAccess([authorizedToolCall]);
+        }, returnsNormally);
+      });
+
+      test('validateToolAccess rejects unauthorized tools', () {
+        final unauthorizedToolCall = ToolCall(
+          id: 'call_1',
+          type: 'function',
+          function: ToolCallFunction(
+            name: 'mock_tool',
+            arguments: '{"param": "value"}',
+          ),
+        );
+
+        expect(() {
+          restrictedAgent.validateToolAccess([unauthorizedToolCall]);
+        }, throwsA(isA<ArgumentError>()));
+      });
+
+      test('validateToolAccess handles mixed authorized/unauthorized tools',
+          () {
+        final authorizedToolCall = ToolCall(
+          id: 'call_1',
+          type: 'function',
+          function: ToolCallFunction(
+            name: 'get_weather',
+            arguments: '{"location": "San Francisco"}',
+          ),
+        );
+
+        final unauthorizedToolCall = ToolCall(
           id: 'call_2',
           type: 'function',
           function: ToolCallFunction(
-            name: 'get_weather',
-            arguments: '{"location": "Paris"}',
+            name: 'mock_tool',
+            arguments: '{"param": "value"}',
           ),
         );
 
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'I will check weather for both cities',
-          toolCalls: [toolCall1, toolCall2],
-        ));
-
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'Weather checked for both cities',
-        ));
-
-        await agent.sendMessage('Check weather for Tokyo and Paris');
-
-        // Check that both tool results were added
-        final toolResults =
-            agent.messages.where((msg) => msg.role == 'tool').toList();
-        expect(toolResults.length, equals(2));
-        expect(toolResults.any((msg) => msg.toolCallId == 'call_1'), isTrue);
-        expect(toolResults.any((msg) => msg.toolCallId == 'call_2'), isTrue);
+        expect(() {
+          restrictedAgent
+              .validateToolAccess([authorizedToolCall, unauthorizedToolCall]);
+        }, throwsA(isA<ArgumentError>()));
       });
 
-      test('✅ Tool execution errors are handled gracefully', () async {
-        // Mock API response with tool call
-        final toolCall = ToolCall(
-          id: 'call_error',
+      test('validateToolAccess allows all tools when allowedToolNames is null',
+          () {
+        final unrestrictedAgent = Agent(
+          apiClient: mockApiClient,
+          toolRegistry: toolRegistry,
+          systemPrompt: 'Test agent',
+          allowedToolNames: null,
+        );
+
+        final anyToolCall = ToolCall(
+          id: 'call_1',
           type: 'function',
           function: ToolCallFunction(
             name: 'get_weather',
-            arguments: '{"location": "InvalidLocation"}',
+            arguments: '{"location": "San Francisco"}',
           ),
         );
 
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'I will check the weather',
-          toolCalls: [toolCall],
-        ));
-
-        // Mock final response after tool execution
-        mockApiClient.setMockResponse(Message.assistant(
-          content: 'I encountered an error checking the weather',
-        ));
-
-        await agent.sendMessage('Check weather for InvalidLocation');
-
-        // Check that tool result was added to conversation
-        final toolResults =
-            agent.messages.where((msg) => msg.role == 'tool').toList();
-        expect(toolResults.length, equals(1));
-        expect(toolResults.first.toolCallId, equals('call_error'));
-        expect(toolResults.first.content, contains('Weather data unavailable'));
+        expect(() {
+          unrestrictedAgent.validateToolAccess([anyToolCall]);
+        }, returnsNormally);
       });
     });
 
-    group('🚀 Message Sending', () {
-      test('✅ Send message returns correct response', () async {
-        final expectedResponse =
-            Message.assistant(content: 'Hello! How can I help you?');
-        mockApiClient.setMockResponse(expectedResponse);
+    group('🚀 INTEGRATION: Tool filtering integrates with sendMessage', () {
+      test('sendMessage uses filtered tools when calling API', () async {
+        // Create a mock API client that captures the tools passed to it
+        List<Tool>? capturedTools;
+        final capturingApiClient = CapturingApiClient(
+          baseUrl: 'https://api.deepseek.com',
+          apiKey: 'test-key',
+          onSendMessage: (messages, tools, config) {
+            capturedTools = tools;
+            return Future.value(Message.assistant(content: 'Test response'));
+          },
+        );
 
-        final response = await agent.sendMessage('Hello');
+        final agent = Agent(
+          apiClient: capturingApiClient,
+          toolRegistry: toolRegistry,
+          systemPrompt: 'Test agent',
+          allowedToolNames: {'get_weather'},
+        );
 
-        expect(response, equals(expectedResponse));
-      });
+        await agent.sendMessage('What is the weather?');
 
-      test('✅ Send message adds user message to conversation', () async {
-        mockApiClient.setMockResponse(Message.assistant(content: 'Response'));
-
-        await agent.sendMessage('Test user message');
-
-        final userMessages =
-            agent.messages.where((msg) => msg.role == 'user').toList();
-        expect(userMessages.length, equals(1));
-        expect(userMessages.first.content, equals('Test user message'));
-      });
-
-      test('✅ Send message adds assistant response to conversation', () async {
-        final assistantResponse =
-            Message.assistant(content: 'Assistant response');
-        mockApiClient.setMockResponse(assistantResponse);
-
-        await agent.sendMessage('Test message');
-
-        final assistantMessages =
-            agent.messages.where((msg) => msg.role == 'assistant').toList();
-        expect(assistantMessages.length, equals(1));
-        expect(assistantMessages.first.content, equals('Assistant response'));
+        expect(capturedTools, isNotNull);
+        expect(capturedTools!.length, equals(1));
+        expect(capturedTools!.first.function.name, equals('get_weather'));
       });
     });
   });
@@ -292,6 +235,7 @@ void main() {
 /// 🎭 MOCK API CLIENT: For testing Agent class without real API calls
 class MockApiClient implements ApiClient {
   final List<Message> _mockResponses = [];
+  ChatCompletionConfig? lastUsedConfig;
 
   void setMockResponse(Message response) {
     _mockResponses.add(response);
@@ -304,10 +248,82 @@ class MockApiClient implements ApiClient {
   String get apiKey => 'test-key';
 
   @override
-  Future<Message> sendMessage(List<Message> messages, List<Tool> tools) async {
+  ChatCompletionConfig get defaultConfig => const ChatCompletionConfig();
+
+  @override
+  Future<Message> sendMessage(
+    List<Message> messages,
+    List<Tool> tools, {
+    ChatCompletionConfig? config,
+  }) async {
+    lastUsedConfig = config ?? defaultConfig;
+
     if (_mockResponses.isEmpty) {
       throw Exception('Mock response not set');
     }
     return _mockResponses.removeAt(0);
+  }
+
+  @override
+  Future<void> close() async {
+    // No cleanup needed for mock client
+  }
+}
+
+/// 🧪 MOCK TOOL EXECUTOR: Test implementation for tool filtering tests
+class MockToolExecutor implements ToolExecutor {
+  @override
+  final String toolName;
+  @override
+  final String toolDescription;
+
+  MockToolExecutor(this.toolName, this.toolDescription);
+
+  @override
+  bool canExecute(ToolCall toolCall) => toolCall.function.name == toolName;
+
+  @override
+  Future<String> executeTool(ToolCall toolCall) async => 'Mock result';
+
+  @override
+  Map<String, dynamic> get toolParameters => {
+        'type': 'object',
+        'properties': {
+          'param': {
+            'type': 'string',
+            'description': 'Test parameter',
+          }
+        },
+        'required': ['param']
+      };
+
+  @override
+  Tool get asTool => Tool(
+        function: FunctionObject(
+          name: toolName,
+          description: toolDescription,
+          parameters: toolParameters,
+        ),
+      );
+}
+
+/// 🧪 CAPTURING API CLIENT: Mock API client that captures parameters for testing
+class CapturingApiClient extends ApiClient {
+  final Future<Message> Function(
+      List<Message>, List<Tool>, ChatCompletionConfig?) onSendMessage;
+
+  CapturingApiClient({
+    required super.baseUrl,
+    required super.apiKey,
+    required this.onSendMessage,
+  });
+
+  @override
+  Future<Message> sendMessage(
+    List<Message> messages,
+    List<Tool> tools, {
+    ChatCompletionConfig? config,
+  }) async {
+    return await onSendMessage(messages, tools, config ?? defaultConfig);
   }
 }

@@ -8,12 +8,8 @@ environment:
 
 dependencies:
   http: ^1.1.0
-  chopper: ^7.0.0
-  json_annotation: ^4.8.1
+  puppeteer: ^3.19.0
 
 dev_dependencies:
   test: ^1.26.0
-  build_runner: ^2.4.0
-  chopper_generator: ^7.0.0
-  json_serializable: ^6.7.0
   lints: ^3.0.0

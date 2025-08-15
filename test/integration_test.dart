@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:test/test.dart';
 import 'package:dart_openai_client/dart_openai_client.dart';
 
@@ -8,17 +9,18 @@ import 'package:dart_openai_client/dart_openai_client.dart';
 void main() {
   group('Integration Tests', () {
     group('🤖 Complete Agent Workflow', () {
-      late MockApiClient mockApiClient;
-      late ToolExecutorRegistry toolRegistry;
-      late WeatherToolExecutor weatherExecutor;
-      late Agent agent;
+      MockApiClient mockApiClient = MockApiClient();
+      TestToolExecutorRegistry toolRegistry = TestToolExecutorRegistry();
+      Agent agent = Agent(
+        apiClient: mockApiClient,
+        toolRegistry: toolRegistry,
+        messages: [],
+        systemPrompt: 'You are a helpful weather assistant.',
+      );
 
       setUp(() {
         mockApiClient = MockApiClient();
-        toolRegistry = ToolExecutorRegistry();
-        weatherExecutor = WeatherToolExecutor();
-        toolRegistry.registerExecutor(weatherExecutor);
-
+        toolRegistry = TestToolExecutorRegistry();
         agent = Agent(
           apiClient: mockApiClient,
           toolRegistry: toolRegistry,
@@ -196,12 +198,13 @@ void main() {
     });
 
     group('🛠️ Tool System Integration', () {
-      late ToolExecutorRegistry toolRegistry;
+      late McpToolExecutorRegistry toolRegistry;
       late WeatherToolExecutor weatherExecutor;
       late MockToolExecutor mockExecutor;
 
       setUp(() {
-        toolRegistry = ToolExecutorRegistry();
+        toolRegistry =
+            McpToolExecutorRegistry(mcpConfig: File("config/mcp_servers.json"));
         weatherExecutor = WeatherToolExecutor();
         mockExecutor = MockToolExecutor();
       });
@@ -314,21 +317,14 @@ void main() {
     });
 
     group('🎯 System Prompt Management', () {
-      late MockApiClient mockApiClient;
-      late ToolExecutorRegistry toolRegistry;
-      late Agent agent;
-
-      setUp(() {
-        mockApiClient = MockApiClient();
-        toolRegistry = ToolExecutorRegistry();
-
-        agent = Agent(
-          apiClient: mockApiClient,
-          toolRegistry: toolRegistry,
-          messages: [],
-          systemPrompt: 'You are a helpful weather assistant.',
-        );
-      });
+      MockApiClient mockApiClient = MockApiClient();
+      TestToolExecutorRegistry toolRegistry = TestToolExecutorRegistry();
+      Agent agent = Agent(
+        apiClient: mockApiClient,
+        toolRegistry: toolRegistry,
+        messages: [],
+        systemPrompt: 'You are a helpful weather assistant.',
+      );
 
       test('✅ System prompt is always first in conversation', () async {
         mockApiClient.setMockResponse(Message.assistant(content: 'Hello!'));
@@ -366,21 +362,14 @@ void main() {
     });
 
     group('🧹 Conversation Management', () {
-      late MockApiClient mockApiClient;
-      late ToolExecutorRegistry toolRegistry;
-      late Agent agent;
-
-      setUp(() {
-        mockApiClient = MockApiClient();
-        toolRegistry = ToolExecutorRegistry();
-
-        agent = Agent(
-          apiClient: mockApiClient,
-          toolRegistry: toolRegistry,
-          messages: [],
-          systemPrompt: 'You are a helpful assistant.',
-        );
-      });
+      MockApiClient mockApiClient = MockApiClient();
+      TestToolExecutorRegistry toolRegistry = TestToolExecutorRegistry();
+      Agent agent = Agent(
+        apiClient: mockApiClient,
+        toolRegistry: toolRegistry,
+        messages: [],
+        systemPrompt: 'You are a helpful assistant.',
+      );
 
       test('✅ Conversation can be cleared', () async {
         mockApiClient.setMockResponse(Message.assistant(content: 'Hello!'));
@@ -396,7 +385,10 @@ void main() {
 
       test('✅ Conversation history is immutable', () {
         final history = agent.conversationHistory;
-        expect(history, isEmpty);
+        expect(
+            history.length, equals(1)); // Only system message should be present
+        expect(history.first.role, equals('system'));
+        expect(history.first.content, equals('You are a helpful assistant.'));
 
         // Try to modify the history (should not affect original)
         expect(
@@ -404,11 +396,51 @@ void main() {
           throwsA(isA<UnsupportedError>()),
         );
 
-        expect(agent.conversationHistory, isEmpty);
-        expect(agent.messageCount, equals(0));
+        expect(agent.conversationHistory.length, equals(1));
+        expect(agent.conversationHistory.first.role, equals('system'));
       });
     });
   });
+}
+
+/// 🧪 TEST TOOL EXECUTOR REGISTRY: Simple registry for testing without MCP initialization
+class TestToolExecutorRegistry extends ToolExecutorRegistry {
+  final Map<String, ToolExecutor> _executors = {};
+
+  @override
+  Map<String, ToolExecutor> get executors => _executors;
+
+  @override
+  int get executorCount => _executors.length;
+
+  @override
+  void registerExecutor(ToolExecutor executor) {
+    _executors[executor.toolName] = executor;
+  }
+
+  @override
+  ToolExecutor? findExecutor(ToolCall toolCall) {
+    return _executors[toolCall.function.name];
+  }
+
+  @override
+  Future<String> executeTool(ToolCall toolCall) async {
+    final executor = findExecutor(toolCall);
+    if (executor == null) {
+      throw Exception('No executor found for tool: ${toolCall.function.name}');
+    }
+    return await executor.executeTool(toolCall);
+  }
+
+  @override
+  List<Tool> getAllTools() {
+    return _executors.values.map((executor) => executor.asTool).toList();
+  }
+
+  @override
+  void clear() {
+    _executors.clear();
+  }
 }
 
 /// 🎭 MOCK API CLIENT: For integration testing without real API calls
@@ -426,11 +458,23 @@ class MockApiClient implements ApiClient {
   String get apiKey => 'test-key';
 
   @override
-  Future<Message> sendMessage(List<Message> messages, List<Tool> tools) async {
+  ChatCompletionConfig get defaultConfig => const ChatCompletionConfig();
+
+  @override
+  Future<Message> sendMessage(
+    List<Message> messages,
+    List<Tool> tools, {
+    ChatCompletionConfig? config,
+  }) async {
     if (_mockResponses.isEmpty) {
       throw Exception('Mock response not set');
     }
     return _mockResponses.removeAt(0);
+  }
+
+  @override
+  Future<void> close() async {
+    // No cleanup needed for mock client
   }
 }
 

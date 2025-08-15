@@ -208,12 +208,12 @@ void main() {
     });
 
     group('🔧 ToolExecutorRegistry', () {
-      late ToolExecutorRegistry registry;
-      late WeatherToolExecutor weatherExecutor;
-      late MockToolExecutor mockExecutor;
+      TestToolExecutorRegistry registry = TestToolExecutorRegistry();
+      WeatherToolExecutor weatherExecutor = WeatherToolExecutor();
+      MockToolExecutor mockExecutor = MockToolExecutor();
 
       setUp(() {
-        registry = ToolExecutorRegistry();
+        registry = TestToolExecutorRegistry();
         weatherExecutor = WeatherToolExecutor();
         mockExecutor = MockToolExecutor();
       });
@@ -339,6 +339,46 @@ void main() {
   });
 }
 
+/// 🧪 TEST TOOL EXECUTOR REGISTRY: Simple registry for testing without MCP initialization
+class TestToolExecutorRegistry extends ToolExecutorRegistry {
+  final Map<String, ToolExecutor> _executors = {};
+
+  @override
+  Map<String, ToolExecutor> get executors => _executors;
+
+  @override
+  int get executorCount => _executors.length;
+
+  @override
+  void registerExecutor(ToolExecutor executor) {
+    _executors[executor.toolName] = executor;
+  }
+
+  @override
+  ToolExecutor? findExecutor(ToolCall toolCall) {
+    return _executors[toolCall.function.name];
+  }
+
+  @override
+  Future<String> executeTool(ToolCall toolCall) async {
+    final executor = findExecutor(toolCall);
+    if (executor == null) {
+      throw Exception('No executor found for tool: ${toolCall.function.name}');
+    }
+    return await executor.executeTool(toolCall);
+  }
+
+  @override
+  List<Tool> getAllTools() {
+    return _executors.values.map((executor) => executor.asTool).toList();
+  }
+
+  @override
+  void clear() {
+    _executors.clear();
+  }
+}
+
 /// 🎭 MOCK TOOL EXECUTOR: For testing ToolExecutorRegistry
 class MockToolExecutor implements ToolExecutor {
   @override
@@ -387,7 +427,7 @@ ToolCall _createToolCall(String functionName) {
   } else {
     arguments = '{"param": "value"}';
   }
-  
+
   return ToolCall(
     id: 'test_call',
     type: 'function',

@@ -17,3 +17,9 @@ doc/api/
 
 # Mac
 .DS_Store
+
+logs/
+doc_temp/
+
+config/
+.local-chrome/

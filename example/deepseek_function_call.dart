@@ -42,7 +42,9 @@ Future<void> main() async {
     final weatherExecutor = WeatherToolExecutor();
 
     // 📝 CREATE TOOL REGISTRY: Register the weather tool executor
-    final toolRegistry = ToolExecutorRegistry();
+    final toolRegistry =
+        McpToolExecutorRegistry(mcpConfig: File("config/mcp_servers.json"));
+    await toolRegistry.initialize();
     toolRegistry.registerExecutor(weatherExecutor);
 
     print(
