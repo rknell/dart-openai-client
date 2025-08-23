@@ -283,7 +283,7 @@ class MockToolExecutor implements ToolExecutor {
   bool canExecute(ToolCall toolCall) => toolCall.function.name == toolName;
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async => 'Mock result';
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async => 'Mock result';
 
   @override
   Map<String, dynamic> get toolParameters => {

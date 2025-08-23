@@ -360,7 +360,7 @@ class TestToolExecutorRegistry extends ToolExecutorRegistry {
   }
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     final executor = findExecutor(toolCall);
     if (executor == null) {
       throw Exception('No executor found for tool: ${toolCall.function.name}');
@@ -402,7 +402,7 @@ class MockToolExecutor implements ToolExecutor {
   }
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     if (!canExecute(toolCall)) {
       throw ArgumentError('Cannot execute tool: ${toolCall.function.name}');
     }

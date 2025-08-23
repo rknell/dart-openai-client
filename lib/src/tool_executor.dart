@@ -17,7 +17,7 @@ abstract class ToolExecutor {
   ///
   /// Returns the result of the tool execution as a string.
   /// This method should be implemented by concrete tool executors.
-  Future<String> executeTool(ToolCall toolCall);
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout});
 
   /// 🔍 CAN EXECUTE: Check if this executor can handle the given tool call
   ///
@@ -101,7 +101,7 @@ class WeatherToolExecutor implements ToolExecutor {
   }
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     if (!canExecute(toolCall)) {
       throw ArgumentError(
           'This executor cannot handle tool: ${toolCall.function.name}');
@@ -216,12 +216,12 @@ abstract class ToolExecutorRegistry {
   ///
   /// Returns the result of the tool execution.
   /// Throws an exception if no executor is found.
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     final executor = findExecutor(toolCall);
     if (executor == null) {
       throw Exception('No executor found for tool: ${toolCall.function.name}');
     }
-    return await executor.executeTool(toolCall);
+    return await executor.executeTool(toolCall, timeout: timeout);
   }
 
   /// 📋 GET ALL TOOLS: Get all registered tools
@@ -451,7 +451,7 @@ class FilteredToolExecutorRegistry extends ToolExecutorRegistry {
   ///
   /// Returns the result of the tool execution.
   /// Throws an exception if no executor is found or tool is not accessible.
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     // Validate tool access before execution
     if (allowedToolNames != null &&
         !allowedToolNames!.contains(toolCall.function.name)) {

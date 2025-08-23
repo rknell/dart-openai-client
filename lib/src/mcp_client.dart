@@ -63,9 +63,24 @@ class McpClient {
         workingDirectory: _config.workingDirectory,
       );
 
-      // Set up error handling
+      // Set up logging from MCP server stderr
       _process!.stderr.transform(utf8.decoder).listen((data) {
-        print('MCP Server Error: $data');
+        // Parse log level from MCP server output format: [timestamp] [level] message
+        final lines = data.trim().split('\n');
+        for (final line in lines) {
+          if (line.trim().isEmpty) continue;
+
+          // Try to extract log level from format: [timestamp] [level] message
+          final logLevelMatch = RegExp(r'\[.*?\]\s*\[(\w+)\]').firstMatch(line);
+          if (logLevelMatch != null) {
+            final level = logLevelMatch.group(1)?.toLowerCase() ?? 'info';
+            final message = line.substring(logLevelMatch.end).trim();
+            print('MCP Server ${level.toUpperCase()}: $message');
+          } else {
+            // Fallback for unformatted messages
+            print('MCP Server LOG: $line');
+          }
+        }
       });
 
       // Set up response stream handling
@@ -281,7 +296,7 @@ class McpClient {
   ///
   /// Sends a JSON-RPC 2.0 request to the MCP server and waits for response.
   Future<Map<String, dynamic>> _sendRequest(
-      String method, Map<String, dynamic> params) async {
+      String method, Map<String, dynamic> params, {Duration? timeout}) async {
     if (_process == null) {
       throw Exception('MCP client not initialized');
     }
@@ -304,9 +319,11 @@ class McpClient {
     _pendingRequests[_requestId] = responseCompleter;
 
     try {
-      // Wait for response with timeout
+      // Wait for response with timeout (configurable for web research)
+      // Use longer default timeout for tools that might involve web research
+      final effectiveTimeout = timeout ?? Duration(seconds: 30);
       final response =
-          await responseCompleter.future.timeout(Duration(seconds: 10));
+          await responseCompleter.future.timeout(effectiveTimeout);
 
       final responseTimestamp = DateTime.now().millisecondsSinceEpoch;
       final duration = responseTimestamp - timestamp;
@@ -334,7 +351,7 @@ class McpClient {
   ///
   /// Executes a tool call by sending it to the MCP server and returning the result.
   /// Falls back to mock tool execution if MCP server fails.
-  Future<String> executeTool(String toolName, String arguments) async {
+  Future<String> executeTool(String toolName, String arguments, {Duration? timeout}) async {
     final startTime = DateTime.now().millisecondsSinceEpoch;
     print('🔧 [${startTime}] EXECUTING TOOL: $toolName');
     print('   📝 Arguments: $arguments');
@@ -346,7 +363,7 @@ class McpClient {
         'arguments': jsonDecode(arguments),
       };
 
-      final response = await _sendRequest('tools/call', params);
+      final response = await _sendRequest('tools/call', params, timeout: timeout);
 
       if (response['error'] != null) {
         throw Exception('MCP tool execution failed: ${response['error']}');
@@ -582,14 +599,14 @@ class McpToolExecutor implements ToolExecutor {
   }
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     if (!canExecute(toolCall)) {
       return 'Error: This executor cannot handle tool: ${toolCall.function.name}';
     }
 
     try {
       final result =
-          await _mcpClient.executeTool(_toolName, toolCall.function.arguments);
+          await _mcpClient.executeTool(_toolName, toolCall.function.arguments, timeout: timeout);
       return result;
     } catch (e) {
       return 'Error executing MCP tool $_toolName: $e';

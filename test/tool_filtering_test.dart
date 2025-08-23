@@ -316,7 +316,7 @@ class MockToolExecutor implements ToolExecutor {
   bool canExecute(ToolCall toolCall) => toolCall.function.name == toolName;
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     return 'Mock result for $toolName';
   }
 
@@ -348,7 +348,7 @@ class MockToolExecutorRegistry extends ToolExecutorRegistry {
   }
 
   @override
-  Future<String> executeTool(ToolCall toolCall) async {
+  Future<String> executeTool(ToolCall toolCall, {Duration? timeout}) async {
     final executor = findExecutor(toolCall);
     if (executor == null) {
       throw Exception('No executor found for tool: ${toolCall.function.name}');
