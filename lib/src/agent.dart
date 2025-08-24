@@ -197,6 +197,8 @@ class Agent {
           currentResponse.toolCalls!.isNotEmpty) {
         toolCallRounds++;
         if (toolCallRounds > maxToolCallRounds) {
+          // Clean up incomplete tool call state before throwing
+          _cleanupIncompleteToolCalls(currentResponse.toolCalls!);
           throw Exception(
               'Maximum tool call rounds exceeded. The AI seems to be stuck in a tool calling loop.');
         }
@@ -238,6 +240,31 @@ class Agent {
         ));
       }
     }
+  }
+
+  /// 🧹 CLEANUP INCOMPLETE TOOL CALLS: Clean up tool call state when max rounds exceeded
+  ///
+  /// [toolCalls] - List of tool calls that couldn't be completed
+  ///
+  /// Adds error responses for incomplete tool calls to prevent context pollution
+  /// and ensure the AI understands why tool execution was terminated.
+  void _cleanupIncompleteToolCalls(List<ToolCall> toolCalls) {
+    for (final toolCall in toolCalls) {
+      // Add error response for each incomplete tool call
+      messages.add(Message.toolResult(
+        toolCallId: toolCall.id,
+        content: 'ERROR: Tool execution terminated - maximum tool call rounds exceeded. '
+                'The AI was stuck in a tool calling loop and execution was stopped to prevent '
+                'context window overflow and infinite loops.',
+      ));
+    }
+    
+    // Add a final assistant message explaining the situation
+    messages.add(Message.assistant(
+      content: '⚠️  SYSTEM INTERVENTION: Maximum tool call rounds (40) exceeded. '
+              'Tool execution has been terminated to prevent infinite loops and context overflow. '
+              'Please simplify your request or break it into smaller steps.',
+    ));
   }
 
   /// ⚙️ UPDATE API CONFIG: Update the agent's API configuration

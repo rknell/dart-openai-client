@@ -139,7 +139,8 @@ class McpClient {
   Future<void> _discoverTools() async {
     try {
       // Try standard MCP protocol first
-      final response = await _sendRequest('tools/list', {});
+      // Use 3-second timeout for tools list (should be VERY fast)
+      final response = await _sendRequest('tools/list', {}, timeout: Duration(seconds: 3));
 
       if (response['result'] != null) {
         final toolsData = response['result']['tools'] as List?;
@@ -163,7 +164,12 @@ class McpClient {
     } catch (e) {
       print('Warning: Standard MCP tool discovery failed: $e');
       print('Trying alternative discovery methods...');
-      await _tryAlternativeDiscoveryMethods();
+      try {
+        await _tryAlternativeDiscoveryMethods();
+      } catch (e2) {
+        // If alternative methods also fail, throw the original error
+        throw Exception('MCP tool discovery failed: $e');
+      }
     }
   }
 
@@ -181,7 +187,8 @@ class McpClient {
     for (final method in alternativeMethods) {
       try {
         print('🔍 Trying alternative method: $method');
-        final response = await _sendRequest(method, {});
+        // Use 3-second timeout for alternative tool discovery methods
+        final response = await _sendRequest(method, {}, timeout: Duration(seconds: 3));
 
         if (response['result'] != null) {
           final toolsData = response['result']['tools'] as List?;
@@ -209,8 +216,9 @@ class McpClient {
     print(
         'This MCP server may not support tool discovery or uses a different protocol');
 
-    // Add mock tools for testing/demonstration purposes
-    await _addMockTools();
+    // Instead of adding mock tools, throw an exception so the AI agent knows
+    // that no tools are available and can handle this appropriately
+    throw Exception('No tools discovered from MCP server. Server may not support tool discovery or uses a different protocol.');
   }
 
   /// 🎭 ADD MOCK TOOLS: Add demonstration tools when no real tools are discovered
@@ -410,8 +418,9 @@ class McpClient {
       final duration = endTime - startTime;
       print('❌ [${endTime}] TOOL FAILED: $toolName (${duration}ms)');
       print('⚠️  MCP tool execution failed: $e');
-      print('🎭 Falling back to mock tool execution...');
-      return await _executeMockTool(toolName, arguments);
+      // Re-throw the error instead of falling back to mock execution
+      // This allows the AI agent to receive the actual error and correct itself
+      rethrow;
     }
   }
 
@@ -609,7 +618,9 @@ class McpToolExecutor implements ToolExecutor {
           await _mcpClient.executeTool(_toolName, toolCall.function.arguments, timeout: timeout);
       return result;
     } catch (e) {
-      return 'Error executing MCP tool $_toolName: $e';
+      // Re-throw the error instead of returning a string
+      // This allows the AI agent to receive the actual error and correct itself
+      rethrow;
     }
   }
 
