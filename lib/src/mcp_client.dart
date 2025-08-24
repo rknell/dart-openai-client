@@ -140,7 +140,8 @@ class McpClient {
     try {
       // Try standard MCP protocol first
       // Use 3-second timeout for tools list (should be VERY fast)
-      final response = await _sendRequest('tools/list', {}, timeout: Duration(seconds: 3));
+      final response =
+          await _sendRequest('tools/list', {}, timeout: Duration(seconds: 3));
 
       if (response['result'] != null) {
         final toolsData = response['result']['tools'] as List?;
@@ -188,7 +189,8 @@ class McpClient {
       try {
         print('🔍 Trying alternative method: $method');
         // Use 3-second timeout for alternative tool discovery methods
-        final response = await _sendRequest(method, {}, timeout: Duration(seconds: 3));
+        final response =
+            await _sendRequest(method, {}, timeout: Duration(seconds: 3));
 
         if (response['result'] != null) {
           final toolsData = response['result']['tools'] as List?;
@@ -218,49 +220,8 @@ class McpClient {
 
     // Instead of adding mock tools, throw an exception so the AI agent knows
     // that no tools are available and can handle this appropriately
-    throw Exception('No tools discovered from MCP server. Server may not support tool discovery or uses a different protocol.');
-  }
-
-  /// 🎭 ADD MOCK TOOLS: Add demonstration tools when no real tools are discovered
-  ///
-  /// This allows the system to work even when MCP servers don't support tool discovery.
-  Future<void> _addMockTools() async {
-    print('🎭 Adding mock tools for demonstration purposes...');
-
-    final mockTools = [
-      {
-        'name': 'mock_web_scrape',
-        'description': 'Mock web scraping tool for demonstration',
-        'inputSchema': {
-          'type': 'object',
-          'properties': {
-            'url': {'type': 'string', 'description': 'URL to scrape'}
-          },
-          'required': ['url']
-        }
-      },
-      {
-        'name': 'mock_file_list',
-        'description': 'Mock file listing tool for demonstration',
-        'inputSchema': {
-          'type': 'object',
-          'properties': {
-            'path': {'type': 'string', 'description': 'Directory path to list'}
-          },
-          'required': ['path']
-        }
-      }
-    ];
-
-    for (final mockTool in mockTools) {
-      try {
-        final tool = _convertMcpToolToTool(mockTool);
-        _tools.add(tool);
-        print('   🎭 Mock Tool: ${tool.function.name}');
-      } catch (e) {
-        print('   ⚠️  Failed to add mock tool: $e');
-      }
-    }
+    throw Exception(
+        'No tools discovered from MCP server. Server may not support tool discovery or uses a different protocol.');
   }
 
   /// 🔄 CONVERT MCP TOOL: Convert MCP tool format to Tool instance
@@ -304,7 +265,8 @@ class McpClient {
   ///
   /// Sends a JSON-RPC 2.0 request to the MCP server and waits for response.
   Future<Map<String, dynamic>> _sendRequest(
-      String method, Map<String, dynamic> params, {Duration? timeout}) async {
+      String method, Map<String, dynamic> params,
+      {Duration? timeout}) async {
     if (_process == null) {
       throw Exception('MCP client not initialized');
     }
@@ -330,8 +292,7 @@ class McpClient {
       // Wait for response with timeout (configurable for web research)
       // Use longer default timeout for tools that might involve web research
       final effectiveTimeout = timeout ?? Duration(seconds: 30);
-      final response =
-          await responseCompleter.future.timeout(effectiveTimeout);
+      final response = await responseCompleter.future.timeout(effectiveTimeout);
 
       final responseTimestamp = DateTime.now().millisecondsSinceEpoch;
       final duration = responseTimestamp - timestamp;
@@ -359,7 +320,8 @@ class McpClient {
   ///
   /// Executes a tool call by sending it to the MCP server and returning the result.
   /// Falls back to mock tool execution if MCP server fails.
-  Future<String> executeTool(String toolName, String arguments, {Duration? timeout}) async {
+  Future<String> executeTool(String toolName, String arguments,
+      {Duration? timeout}) async {
     final startTime = DateTime.now().millisecondsSinceEpoch;
     print('🔧 [${startTime}] EXECUTING TOOL: $toolName');
     print('   📝 Arguments: $arguments');
@@ -371,7 +333,8 @@ class McpClient {
         'arguments': jsonDecode(arguments),
       };
 
-      final response = await _sendRequest('tools/call', params, timeout: timeout);
+      final response =
+          await _sendRequest('tools/call', params, timeout: timeout);
 
       if (response['error'] != null) {
         throw Exception('MCP tool execution failed: ${response['error']}');
@@ -421,40 +384,6 @@ class McpClient {
       // Re-throw the error instead of falling back to mock execution
       // This allows the AI agent to receive the actual error and correct itself
       rethrow;
-    }
-  }
-
-  /// 🎭 EXECUTE MOCK TOOL: Execute mock tools for demonstration
-  ///
-  /// [toolName] - Name of the mock tool to execute
-  /// [arguments] - Tool arguments as JSON string
-  ///
-  /// Provides mock responses for demonstration purposes.
-  Future<String> _executeMockTool(String toolName, String arguments) async {
-    try {
-      final args = jsonDecode(arguments);
-
-      switch (toolName) {
-        case 'mock_web_scrape':
-          final url = args['url'] as String? ?? 'unknown';
-          return '🎭 Mock web scraping result for $url:\n'
-              '📊 Retrieved 200 todos from JSONPlaceholder API\n'
-              '📋 Sample data: delectus aut autem, quis ut nam facilis, fugiat veniam minus\n'
-              '📈 Analysis: 90 completed (45%), 110 incomplete (55%)';
-
-        case 'mock_file_list':
-          final path = args['path'] as String? ?? 'unknown';
-          return '🎭 Mock file listing for $path:\n'
-              '📁 config/mcp_servers.json\n'
-              '📁 lib/src/mcp_client.dart\n'
-              '📁 bin/mcp_function_call.dart\n'
-              '📁 docs/MCP_USAGE.md';
-
-        default:
-          return '🎭 Mock tool execution: $toolName with arguments $arguments';
-      }
-    } catch (e) {
-      return '🎭 Mock tool execution error: $e';
     }
   }
 
@@ -614,8 +543,9 @@ class McpToolExecutor implements ToolExecutor {
     }
 
     try {
-      final result =
-          await _mcpClient.executeTool(_toolName, toolCall.function.arguments, timeout: timeout);
+      final result = await _mcpClient.executeTool(
+          _toolName, toolCall.function.arguments,
+          timeout: timeout);
       return result;
     } catch (e) {
       // Re-throw the error instead of returning a string
