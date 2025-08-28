@@ -5,6 +5,15 @@ import 'tool.dart';
 import 'message.dart';
 import 'tool_executor.dart';
 
+/// 📊 LOG LEVEL: Controls output verbosity for MCP client
+enum LogLevel {
+  none, // No output
+  error, // Only errors
+  warn, // Warnings and errors
+  info, // Info, warnings, and errors (default)
+  debug, // All output including debug info
+}
+
 /// 🌐 MCP CLIENT: Model Context Protocol Client Implementation
 ///
 /// Provides communication with MCP servers to discover and execute tools.
@@ -15,6 +24,7 @@ import 'tool_executor.dart';
 /// - JSON-RPC 2.0 protocol for message exchange
 /// - Async/await for non-blocking operations
 /// - Tool discovery on initialization for performance
+/// - Configurable logging levels for clean vs. detailed output
 class McpClient {
   /// 🔧 MCP SERVER PROCESS: The running MCP server instance
   Process? _process;
@@ -40,10 +50,94 @@ class McpClient {
   /// 🔒 INITIALIZATION LOCK: Prevent multiple initializations
   bool _isInitialized = false;
 
+  /// 📊 LOGGING LEVEL: Controls output verbosity
+  final LogLevel _logLevel;
+
   /// 🏗️ CONSTRUCTOR: Create new MCP client
   ///
   /// [config] - Configuration for the MCP server to connect to
-  McpClient(this._config);
+  McpClient(this._config) : _logLevel = _determineLogLevel();
+
+  /// 🔍 DETERMINE LOG LEVEL: Check environment variables for logging control
+  static LogLevel _determineLogLevel() {
+    final debugEnv = Platform.environment['MCP_DEBUG']?.toLowerCase();
+    final verboseEnv = Platform.environment['MCP_VERBOSE']?.toLowerCase();
+
+    if (debugEnv == 'true' || verboseEnv == 'true') {
+      return LogLevel.debug;
+    }
+
+    final logLevelEnv = Platform.environment['MCP_LOG_LEVEL']?.toLowerCase();
+    switch (logLevelEnv) {
+      case 'debug':
+        return LogLevel.debug;
+      case 'info':
+        return LogLevel.info;
+      case 'warn':
+        return LogLevel.warn;
+      case 'error':
+        return LogLevel.error;
+      case 'none':
+        return LogLevel.none;
+      default:
+        return LogLevel.info; // Default to clean, minimal output
+    }
+  }
+
+  /// 📝 LOG MESSAGE: Output message based on current log level
+  void _log(LogLevel level, String message, {Object? data}) {
+    if (level.index >= _logLevel.index) {
+      switch (level) {
+        case LogLevel.debug:
+          print('🔍 DEBUG: $message${data != null ? ' - $data' : ''}');
+          break;
+        case LogLevel.info:
+          print('ℹ️  $message');
+          break;
+        case LogLevel.warn:
+          print('⚠️  $message');
+          break;
+        case LogLevel.error:
+          print('❌ $message');
+          break;
+        case LogLevel.none:
+          // No output
+          break;
+      }
+    }
+  }
+
+  /// 🎯 GET TOOL JUSTIFICATION: Extract meaningful description from tool call
+  String _getToolJustification(
+      String toolName, Map<String, dynamic> arguments) {
+    switch (toolName) {
+      case 'read_text_file':
+        final path = arguments['path'] as String? ?? 'unknown';
+        return 'reading file $path';
+      case 'write_text_file':
+        final path = arguments['path'] as String? ?? 'unknown';
+        return 'writing file $path';
+      case 'directory_tree':
+        final path = arguments['path'] as String? ?? 'unknown';
+        return 'scanning directory $path';
+      case 'execute_terminal_command':
+        final command = arguments['command'] as String? ?? 'unknown';
+        final args = arguments['arguments'] as List<dynamic>? ?? [];
+        final fullCommand =
+            args.isEmpty ? command : '$command ${args.join(' ')}';
+        return 'executing: $fullCommand';
+      case 'list_mcp_servers':
+        return 'listing available MCP servers';
+      case 'read_mcp_server_config':
+        return 'reading MCP server configuration';
+      case 'write_mcp_server_config':
+        return 'updating MCP server configuration';
+      default:
+        // For unknown tools, show the name and first few argument keys
+        final argKeys = arguments.keys.take(3).join(', ');
+        return 'executing $toolName with ${arguments.isEmpty ? 'no arguments' : 'args: $argKeys'}';
+    }
+  }
 
   /// 🚀 INITIALIZE: Start MCP server and discover tools
   ///
@@ -65,20 +159,24 @@ class McpClient {
 
       // Set up logging from MCP server stderr
       _process!.stderr.transform(utf8.decoder).listen((data) {
-        // Parse log level from MCP server output format: [timestamp] [level] message
-        final lines = data.trim().split('\n');
-        for (final line in lines) {
-          if (line.trim().isEmpty) continue;
+        // Only show MCP server logs in debug mode
+        if (_logLevel == LogLevel.debug) {
+          final lines = data.trim().split('\n');
+          for (final line in lines) {
+            if (line.trim().isEmpty) continue;
 
-          // Try to extract log level from format: [timestamp] [level] message
-          final logLevelMatch = RegExp(r'\[.*?\]\s*\[(\w+)\]').firstMatch(line);
-          if (logLevelMatch != null) {
-            final level = logLevelMatch.group(1)?.toLowerCase() ?? 'info';
-            final message = line.substring(logLevelMatch.end).trim();
-            print('MCP Server ${level.toUpperCase()}: $message');
-          } else {
-            // Fallback for unformatted messages
-            print('MCP Server LOG: $line');
+            // Try to extract log level from format: [timestamp] [level] message
+            final logLevelMatch =
+                RegExp(r'\[.*?\]\s*\[(\w+)\]').firstMatch(line);
+            if (logLevelMatch != null) {
+              final level = logLevelMatch.group(1)?.toLowerCase() ?? 'info';
+              final message = line.substring(logLevelMatch.end).trim();
+              _log(LogLevel.debug,
+                  'MCP Server ${level.toUpperCase()}: $message');
+            } else {
+              // Fallback for unformatted messages
+              _log(LogLevel.debug, 'MCP Server LOG: $line');
+            }
           }
         }
       });
@@ -110,7 +208,7 @@ class McpClient {
           }
         },
         onError: (error) {
-          print('MCP stdout error: $error');
+          _log(LogLevel.error, 'MCP stdout error: $error');
         },
         onDone: () {
           // Don't auto-close the controller here
@@ -125,7 +223,7 @@ class McpClient {
       await _discoverTools();
 
       _isInitialized = true;
-      print('✅ MCP Client initialized with ${_tools.length} tools');
+      _log(LogLevel.info, 'MCP Client initialized with ${_tools.length} tools');
     } catch (e) {
       throw Exception('Failed to initialize MCP client: $e');
     }
@@ -146,14 +244,17 @@ class McpClient {
       if (response['result'] != null) {
         final toolsData = response['result']['tools'] as List?;
         if (toolsData != null) {
-          print('🔍 Discovered ${toolsData.length} tools from MCP server');
+          _log(LogLevel.info,
+              'Discovered ${toolsData.length} tools from MCP server');
           for (final toolData in toolsData) {
             try {
               final tool = _convertMcpToolToTool(toolData);
               _tools.add(tool);
-              print('   ✅ Tool: ${tool.function.name}');
+              if (_logLevel == LogLevel.debug) {
+                _log(LogLevel.debug, 'Tool: ${tool.function.name}');
+              }
             } catch (e) {
-              print('   ⚠️  Failed to convert tool: $e');
+              _log(LogLevel.warn, 'Failed to convert tool: $e');
             }
           }
           return; // Success, exit early
@@ -163,8 +264,8 @@ class McpClient {
       // Try alternative method names
       await _tryAlternativeDiscoveryMethods();
     } catch (e) {
-      print('Warning: Standard MCP tool discovery failed: $e');
-      print('Trying alternative discovery methods...');
+      _log(LogLevel.warn, 'Standard MCP tool discovery failed: $e');
+      _log(LogLevel.info, 'Trying alternative discovery methods...');
       try {
         await _tryAlternativeDiscoveryMethods();
       } catch (e2) {
@@ -187,7 +288,9 @@ class McpClient {
 
     for (final method in alternativeMethods) {
       try {
-        print('🔍 Trying alternative method: $method');
+        if (_logLevel == LogLevel.debug) {
+          _log(LogLevel.debug, 'Trying alternative method: $method');
+        }
         // Use 3-second timeout for alternative tool discovery methods
         final response =
             await _sendRequest(method, {}, timeout: Duration(seconds: 3));
@@ -195,27 +298,32 @@ class McpClient {
         if (response['result'] != null) {
           final toolsData = response['result']['tools'] as List?;
           if (toolsData != null && toolsData.isNotEmpty) {
-            print('🔍 Discovered ${toolsData.length} tools using $method');
+            _log(LogLevel.info,
+                'Discovered ${toolsData.length} tools using $method');
             for (final toolData in toolsData) {
               try {
                 final tool = _convertMcpToolToTool(toolData);
                 _tools.add(tool);
-                print('   ✅ Tool: ${tool.function.name}');
+                if (_logLevel == LogLevel.debug) {
+                  _log(LogLevel.debug, 'Tool: ${tool.function.name}');
+                }
               } catch (e) {
-                print('   ⚠️  Failed to convert tool: $e');
+                _log(LogLevel.warn, 'Failed to convert tool: $e');
               }
             }
             return; // Success, exit early
           }
         }
       } catch (e) {
-        print('   ⚠️  Method $method failed: $e');
+        if (_logLevel == LogLevel.debug) {
+          _log(LogLevel.debug, 'Method $method failed: $e');
+        }
         continue;
       }
     }
 
-    print('⚠️  No tools discovered using any method');
-    print(
+    _log(LogLevel.warn, 'No tools discovered using any method');
+    _log(LogLevel.warn,
         'This MCP server may not support tool discovery or uses a different protocol');
 
     // Instead of adding mock tools, throw an exception so the AI agent knows
@@ -280,8 +388,13 @@ class McpClient {
 
     final requestJson = jsonEncode(request);
     final timestamp = DateTime.now().millisecondsSinceEpoch;
-    print('🕐 [${timestamp}] 📤 MCP Request #${_requestId}: $method');
-    print('   📋 Params: ${jsonEncode(params)}');
+
+    // Only show detailed request info in debug mode
+    if (_logLevel == LogLevel.debug) {
+      _log(LogLevel.debug, 'MCP Request #${_requestId}: $method');
+      _log(LogLevel.debug, 'Params: ${jsonEncode(params)}');
+    }
+
     _process!.stdin.writeln(requestJson);
 
     // Create a completer for this request
@@ -296,10 +409,13 @@ class McpClient {
 
       final responseTimestamp = DateTime.now().millisecondsSinceEpoch;
       final duration = responseTimestamp - timestamp;
-      print(
-          '🕐 [${responseTimestamp}] 📥 MCP Response #${_requestId}: ${duration}ms');
-      print(
-          '   📄 Result: ${response.length > 200 ? response.substring(0, 200) + '...' : response}');
+
+      // Only show detailed response info in debug mode
+      if (_logLevel == LogLevel.debug) {
+        _log(LogLevel.debug, 'MCP Response #${_requestId}: ${duration}ms');
+        _log(LogLevel.debug,
+            'Result: ${response.length > 200 ? response.substring(0, 200) + '...' : response}');
+      }
 
       return jsonDecode(response) as Map<String, dynamic>;
     } catch (e) {
@@ -323,8 +439,24 @@ class McpClient {
   Future<String> executeTool(String toolName, String arguments,
       {Duration? timeout}) async {
     final startTime = DateTime.now().millisecondsSinceEpoch;
-    print('🔧 [${startTime}] EXECUTING TOOL: $toolName');
-    print('   📝 Arguments: $arguments');
+
+    // Parse arguments to get meaningful justification
+    Map<String, dynamic> parsedArgs;
+    try {
+      parsedArgs = jsonDecode(arguments) as Map<String, dynamic>;
+    } catch (e) {
+      parsedArgs = {};
+    }
+
+    // Show meaningful tool justification instead of raw technical details
+    final justification = _getToolJustification(toolName, parsedArgs);
+    _log(LogLevel.info, justification);
+
+    // Show detailed info only in debug mode
+    if (_logLevel == LogLevel.debug) {
+      _log(LogLevel.debug, 'EXECUTING TOOL: $toolName');
+      _log(LogLevel.debug, 'Arguments: $arguments');
+    }
 
     try {
       // MCP protocol uses 'tools/call' method
@@ -357,8 +489,17 @@ class McpClient {
             final toolResult = textParts.join('\n');
             final endTime = DateTime.now().millisecondsSinceEpoch;
             final duration = endTime - startTime;
-            print('✅ [${endTime}] TOOL COMPLETED: $toolName (${duration}ms)');
-            print('   📊 Result length: ${toolResult.length} characters');
+
+            // Show completion status with meaningful info
+            if (_logLevel == LogLevel.debug) {
+              _log(LogLevel.debug, 'TOOL COMPLETED: $toolName (${duration}ms)');
+              _log(LogLevel.debug,
+                  'Result length: ${toolResult.length} characters');
+            } else {
+              // In info mode, show just the completion status
+              _log(LogLevel.info, '✓ completed (${duration}ms)');
+            }
+
             return toolResult;
           }
         }
@@ -366,7 +507,13 @@ class McpClient {
         final toolResult = content.toString();
         final endTime = DateTime.now().millisecondsSinceEpoch;
         final duration = endTime - startTime;
-        print('✅ [${endTime}] TOOL COMPLETED: $toolName (${duration}ms)');
+
+        if (_logLevel == LogLevel.debug) {
+          _log(LogLevel.debug, 'TOOL COMPLETED: $toolName (${duration}ms)');
+        } else {
+          _log(LogLevel.info, '✓ completed (${duration}ms)');
+        }
+
         return toolResult;
       } else if (responseResult != null && responseResult['isError'] == true) {
         return 'Tool execution error: ${responseResult['error'] ?? 'Unknown error'}';
@@ -374,13 +521,21 @@ class McpClient {
 
       final endTime = DateTime.now().millisecondsSinceEpoch;
       final duration = endTime - startTime;
-      print('✅ [${endTime}] TOOL COMPLETED: $toolName (${duration}ms)');
+
+      if (_logLevel == LogLevel.debug) {
+        _log(LogLevel.debug, 'TOOL COMPLETED: $toolName (${duration}ms)');
+      } else {
+        _log(LogLevel.info, '✓ completed (${duration}ms)');
+      }
+
       return 'Tool executed successfully';
     } catch (e) {
       final endTime = DateTime.now().millisecondsSinceEpoch;
       final duration = endTime - startTime;
-      print('❌ [${endTime}] TOOL FAILED: $toolName (${duration}ms)');
-      print('⚠️  MCP tool execution failed: $e');
+
+      _log(LogLevel.error, 'Tool failed: $toolName (${duration}ms)');
+      _log(LogLevel.error, 'MCP tool execution failed: $e');
+
       // Re-throw the error instead of falling back to mock execution
       // This allows the AI agent to receive the actual error and correct itself
       rethrow;
@@ -401,7 +556,7 @@ class McpClient {
   ///
   /// Stops the MCP server process and cleans up resources.
   Future<void> dispose() async {
-    print('🧹 Disposing MCP client...');
+    _log(LogLevel.info, 'Disposing MCP client...');
 
     // Complete any pending requests with timeout errors
     for (final completer in _pendingRequests.values) {
@@ -412,20 +567,31 @@ class McpClient {
     _pendingRequests.clear();
 
     if (_process != null) {
-      print('   🚫 Killing MCP server process...');
+      if (_logLevel == LogLevel.debug) {
+        _log(LogLevel.debug, 'Killing MCP server process...');
+      }
       _process!.kill();
       _process = null;
-      print('   ✅ Process killed');
+      if (_logLevel == LogLevel.debug) {
+        _log(LogLevel.debug, 'Process killed');
+      }
     }
 
     if (_responseController != null) {
-      print('   🔒 Closing response controller...');
+      if (_logLevel == LogLevel.debug) {
+        _log(LogLevel.debug, 'Closing response controller...');
+      }
       try {
         // Close with timeout to prevent hanging
         await _responseController!.close().timeout(Duration(seconds: 2));
-        print('   ✅ Response controller closed');
+        if (_logLevel == LogLevel.debug) {
+          _log(LogLevel.debug, 'Response controller closed');
+        }
       } catch (e) {
-        print('   ⚠️  Response controller close timeout, forcing close');
+        if (_logLevel == LogLevel.debug) {
+          _log(LogLevel.debug,
+              'Response controller close timeout, forcing close');
+        }
         try {
           _responseController!.addError('Forced close');
         } catch (e) {
@@ -436,7 +602,7 @@ class McpClient {
     }
 
     _isInitialized = false;
-    print('✅ MCP client disposed successfully');
+    _log(LogLevel.info, 'MCP client disposed successfully');
   }
 }
 
